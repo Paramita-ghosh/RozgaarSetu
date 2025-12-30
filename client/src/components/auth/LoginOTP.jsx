@@ -9,11 +9,10 @@ const LoginOTP = ({ setPhone, onSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   
-  // Use a ref to store the verifier to prevent multiple initializations
   const recaptchaVerifierRef = useRef(null);
 
   useEffect(() => {
-    // Initialize reCAPTCHA once when component mounts
+    // Only initialize once
     if (!recaptchaVerifierRef.current) {
       try {
         recaptchaVerifierRef.current = new RecaptchaVerifier(auth, 'recaptcha-container', {
@@ -25,12 +24,13 @@ const LoginOTP = ({ setPhone, onSuccess }) => {
             setError("reCAPTCHA expired. Please try again.");
           }
         });
+
       } catch (err) {
         console.error("reCAPTCHA Init Error:", err);
+        setError("Failed to initialize reCAPTCHA. Check your site key.");
       }
     }
 
-    // Cleanup on unmount
     return () => {
       if (recaptchaVerifierRef.current) {
         recaptchaVerifierRef.current.clear();
@@ -44,26 +44,36 @@ const LoginOTP = ({ setPhone, onSuccess }) => {
     setLoading(true);
     setError("");
 
-    if (!phoneNumber.startsWith("+")) {
-      setError("Please include country code (e.g., +91)");
+    const finalNumber = phoneNumber.startsWith("+") ? phoneNumber : `+91${phoneNumber}`;
+
+    if (!phoneNumber || phoneNumber.length < 10) {
+      setError("Please enter a valid phone number");
       setLoading(false);
       return;
     }
 
-    const appVerifier = recaptchaVerifierRef.current;
-
     try {
-      const confirmation = await signInWithPhoneNumber(auth, phoneNumber, appVerifier);
+      const appVerifier = recaptchaVerifierRef.current;
+      if (!appVerifier) throw new Error("reCAPTCHA verifier not ready");
+
+      const confirmation = await signInWithPhoneNumber(auth, finalNumber, appVerifier);
       window.confirmationResult = confirmation;
-      setPhone(phoneNumber);
+      setPhone(finalNumber);
       onSuccess();
     } catch (err) {
       console.error("SMS Error:", err);
-      setError("Failed to send SMS. Verify number or try again later.");
-      
-      // Reset reCAPTCHA if it fails so user can retry
+
+      if (err.code === 'auth/invalid-app-credential') {
+        setError("App verification failed. Make sure App Check & reCAPTCHA are enabled and domains are whitelisted.");
+      } else if (err.code === 'auth/invalid-phone-number') {
+        setError("Invalid phone number. Please use format +91XXXXXXXXXX.");
+      } else {
+        setError("Failed to send SMS. Try again.");
+      }
+
+      // Reset reCAPTCHA for retry
       if (window.grecaptcha && recaptchaVerifierRef.current) {
-          window.grecaptcha.reset();
+        window.grecaptcha.reset();
       }
     } finally {
       setLoading(false);
@@ -72,7 +82,6 @@ const LoginOTP = ({ setPhone, onSuccess }) => {
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-      {/* IMPORTANT: This ID must exactly match the string in RecaptchaVerifier */}
       <div id="recaptcha-container"></div>
 
       <div className="relative">
